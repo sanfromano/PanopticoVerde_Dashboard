@@ -1,11 +1,12 @@
 ---
 title: "Interacciónes entre ODS's"
 format: dashboard
+theme: minty
 ---
 
 # Interacciónes entre ODS's
 
-## {.sidebar}
+## {.sidebar} 
 ```{python}
 from shiny.express import render, ui
 ui.input_select("x", "Variable:",
