@@ -1,0 +1,16 @@
+{
+  "hash": "c266187404967ac6300cdb2b015f1c71",
+  "result": {
+    "engine": "jupyter",
+    "markdown": "---\ntitle: \"Interacciónes entre ODS's\"\nformat: dashboard\n---\n\n# Interacciónes entre ODS's\n\n## {.sidebar}\n\n::: {#aa98e671 .cell execution_count=1}\n\n::: {.cell-output .cell-output-display execution_count=1}\n```{=html}\n<div class=\"form-group shiny-input-container\">\n  <label class=\"control-label\" id=\"x-label\" for=\"x\">Variable:</label>\n  <div>\n    <select class=\"shiny-input-select form-select\" id=\"x\">      <option value=\"bill_length_mm\" selected=\"\">bill_length_mm</option>\n      <option value=\"bill_depth_mm\">bill_depth_mm</option></select>\n  </div>\n</div>\n```\n:::\n\n::: {.cell-output .cell-output-display execution_count=1}\n```{=html}\n<div class=\"form-group shiny-input-container\">\n  <label class=\"control-label\" id=\"dist-label\" for=\"dist\">Distribution:</label>\n  <div>\n    <select class=\"shiny-input-select form-select\" id=\"dist\">      <option value=\"hist\" selected=\"\">hist</option>\n      <option value=\"kde\">kde</option></select>\n  </div>\n</div>\n```\n:::\n\n::: {.cell-output .cell-output-display execution_count=1}\n```{=html}\n<div class=\"form-group shiny-input-container\">\n  <div class=\"checkbox\">\n    <label><input id=\"rug\" type=\"checkbox\" class=\"shiny-input-checkbox\"/> <span>Show rug marks</span></label>\n  </div>\n</div>\n```\n:::\n:::\n\n\n## Column\n\n# ODS's detallados\n\n",
+    "supporting": [
+      "index_files/figure-html"
+    ],
+    "filters": [],
+    "includes": {
+      "include-in-header": [
+        "<script src=\"https://cdn.jsdelivr.net/npm/requirejs@2.3.6/require.min.js\" integrity=\"sha384-c9c+LnTbwQ3aujuU7ULEPVvgLs+Fn6fJUvIGTsuu1ZcCf11fiEubah0ttpca4ntM sha384-6V1/AdqZRWk1KAlWbKBlGhN7VG4iE/yAZcO6NZPMF8od0vukrvr0tg4qY6NSrItx\" crossorigin=\"anonymous\"></script>\n<script src=\"https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js\" integrity=\"sha384-ZvpUoO/+PpLXR1lu4jmpXWu80pZlYUAfxl5NsBMWOEPSjUn/6Z/hRTt8+pR6L4N2\" crossorigin=\"anonymous\" data-relocate-top=\"true\"></script>\n<script type=\"application/javascript\">define('jquery', [],function() {return window.jQuery;})</script>\n"
+      ]
+    }
+  }
+}
