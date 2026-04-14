@@ -1,0 +1,7 @@
+---
+title: "Dashboard"
+format: html
+---
+
+# Hello, world!
+Texto prueba para el dashboard
