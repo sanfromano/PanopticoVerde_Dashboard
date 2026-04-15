@@ -1,0 +1,89 @@
+{
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "---\n",
+        "title: \"Interacciónes entre ODS's\"\n",
+        "format: dashboard\n",
+        "theme: minty\n",
+        "---\n",
+        "\n",
+        "# Interacciónes entre ODS's\n",
+        "\n",
+        "## {.sidebar} "
+      ],
+      "id": "d7b72606"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## Column"
+      ],
+      "id": "9119a965"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#Haremos un enum "
+      ],
+      "id": "45b37e86",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#Vamos a hacer una gráfica de la cantidad de datos que tenemos de cada ODS utilizando pandas y matplotlib y plotly\n",
+        "import pandas as pd\n",
+        "import matplotlib.pyplot as plt\n",
+        "import plotly.express as px\n",
+        "# Cargar los datos\n",
+        "data = pd.read_csv(\"../datos/datosODSInegi/catalogo_ods_inegi.csv\")\n",
+        "# Recorremos los renglones del dataframe y contamos la cantidad de datos que tenemos de cada ODS\n",
+        "ods_counts = {}\n",
+        "for index, row in data.iterrows():\n",
+        "    # Si el ods de la columna objetivo_desc no está en el diccionario, lo agregamos  y si ya existe le sumamos el valor de la columna num_registros\n",
+        "    if row[\"objetivo_desc\"] not in ods_counts:\n",
+        "        ods_counts[row[\"objetivo_desc\"]] = row[\"num_registros\"]\n",
+        "    else:\n",
+        "        ods_counts[row[\"objetivo_desc\"]] += row[\"num_registros\"]\n",
+        "# Convertimos el diccionario a un dataframe para poder graficarlo\n",
+        "ods_counts_df = pd.DataFrame(list(ods_counts.items()), columns=[\"ODS\", \"Cantidad de datos\"])\n",
+        "\n",
+        "\n",
+        "\n",
+        "# Graficamos la cantidad de datos que tenemos de cada ODS utilizando plotly, las etiquetas del eje y deben estar en vertical y el título de la gráfica debe ser \"Cantidad de datos por ODS reportados por INEGI\"\n",
+        "fig = px.bar(ods_counts_df, x=\"ODS\", y=\"Cantidad de datos\", title=\"Cantidad de datos por ODS reportados por INEGI\")\n",
+        "fig.update_layout(yaxis=dict(tickangle=0))\n",
+        "\n",
+        "fig.show()"
+      ],
+      "id": "3162dc0b",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "# ODS's detallados"
+      ],
+      "id": "e66ed09d"
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "name": "python3",
+      "language": "python",
+      "display_name": "Python 3 (ipykernel)",
+      "path": "/home/santiago/Documents/HackODS/PanopticoVerdeDashboard/.venv/share/jupyter/kernels/python3"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 5
+}

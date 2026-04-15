@@ -6,15 +6,44 @@ theme: minty
 
 # Interacciónes entre ODS's
 
-## {.sidebar} 
+## Row
 ```{python}
-from shiny.express import render, ui
-ui.input_select("x", "Variable:",
-                choices=["bill_length_mm", "bill_depth_mm"])
-ui.input_select("dist", "Distribution:", choices=["hist", "kde"])
-ui.input_checkbox("rug", "Show rug marks", value = False)
-```
+#Vamos a hacer una gráfica de la cantidad de datos que tenemos de cada ODS utilizando pandas y matplotlib y plotly
+import pandas as pd
+import matplotlib.pyplot as plt
+import plotly.express as px
+# Cargar los datos
+data = pd.read_csv("../datos/datosODSInegi/catalogo_ods_inegi.csv")
+# Recorremos los renglones del dataframe y contamos la cantidad de datos que tenemos de cada ODS
+ods_counts = {}
+for index, row in data.iterrows():
+    # Si el ods de la columna objetivo_desc no está en el diccionario, lo agregamos  y si ya existe le sumamos el valor de la columna num_registros
+    if row["objetivo_desc"] not in ods_counts:
+        ods_counts[row["objetivo_desc"]] = row["num_registros"]
+    else:
+        ods_counts[row["objetivo_desc"]] += row["num_registros"]
+# Convertimos el diccionario a un dataframe para poder graficarlo
+ods_counts_df = pd.DataFrame(list(ods_counts.items()), columns=["ODS", "Cantidad de datos"])
 
-## Column
+
+
+# Graficamos la cantidad de datos que tenemos de cada ODS utilizando plotly, las etiquetas del eje y deben estar en vertical y el título de la gráfica debe ser "Cantidad de datos por ODS reportados por INEGI"
+fig = px.bar(ods_counts_df, x="ODS", y="Cantidad de datos", 
+             title="Cantidad de datos por ODS reportados por INEGI", 
+             color="ODS").update_xaxes(showticklabels=False).update_layout(
+    xaxis=dict(side="top"),
+    margin=dict(r=400),        # Margen derecho amplio para la leyenda
+    legend=dict(
+        orientation="v",       # Vertical en lugar de horizontal
+        yanchor="top",
+        y=1,
+        xanchor="left",
+        x=1.02,                # Justo a la derecha de la gráfica
+        title_text="ODS",
+        font=dict(size=10),    # Texto más pequeño si hay muchos ODS
+    ),
+)
+fig.show()
+```
 
 # ODS's detallados
