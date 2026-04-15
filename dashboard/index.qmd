@@ -1,12 +1,983 @@
 ---
-title: "Interacciónes entre ODS's"
+title: "Medir sin ver: Los puntos ciegos del desarrollo"
 format: dashboard
 theme: minty
 ---
 
-# Interacciónes entre ODS's
 
-## Row
+
+## Row {10%}
+En México, distintas instituciones miden el desarrollo. Existen diferencias en los datos, cobertura y metodologías, creando vacíos que distorcionan la realidad.
+
+Se analizaron 3 instituciones clave: el Banco Mundial (WB), el Instituto Nacional de Estadística y Geografía (INEGI) y la ONU a través de su API de indicadores ODS. Se midieron más de 230 indicadores únicos relacionados con los 17 ODS's para observar las faltas de datos y la diferencia entre la cobertura de los distintos ODS's.
+
+# ONU
+
+## Row {0%}
+```{python}
+#| output: false
+
+import json
+import time
+from pathlib import Path
+from dataclasses import dataclass, field
+
+import requests
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+import wbgapi as wb
+
+#── Configuración global ────────────────────────────────────────────────────
+
+CACHE_DIR = Path("data_cache")
+CACHE_DIR.mkdir(exist_ok=True)
+
+# País por defecto (ISO-3)
+DEFAULT_COUNTRY = "MEX"
+
+# Rango de años
+YEAR_START = 2000
+YEAR_END   = 2023
+
+# Paleta de colores fija por fuente
+COLORS = {
+    "worldbank": "#1D9E75",   # teal — ODS / Banco Mundial
+    "inegi":     "#534AB7",   # purple — INEGI
+    "alt1":      "#D85A30",   # coral
+    "alt2":      "#BA7517",   # amber
+}
+
+#── Dataclass para un indicador ────────────────────────────────────────────
+
+@dataclass
+class Indicator:
+    """Representa un indicador de cualquier fuente con sus metadatos."""
+    code: str                        # código en la API origen
+    label: str                       # nombre corto para gráficas
+    source: str                      # "worldbank" | "inegi"
+    unit: str = ""                   # ej. "%" | "personas" | "índice"
+    country: str = DEFAULT_COUNTRY
+    extra_params: dict = field(default_factory=dict)  # params adicionales
+
+# %% ── Catálogo de indicadores ODS ────────────────────────────────────────────
+# Fuente primaria: World Bank API (wbgapi)
+# Códigos verificados contra: https://data.worldbank.org/indicator
+#
+# Notas de cobertura:
+#   - 9.1.1 y 13.3.1 no tienen código WB exacto al nivel del indicador ODS —
+#     se usa el proxy más cercano disponible. Se documenta la diferencia.
+#   - 5.5.2 tiene cobertura irregular (años sueltos, no serie continua).
+#   - Para datos por sector (GHG) y municipales, se necesitará INEGI/SEMARNAT.
+
+CATALOG: dict[str, Indicator] = {
+
+    # ── ODS 8.6.1 ─────────────────────────────────────────────────────────────
+    # Proporción de jóvenes (15-24) que no estudian, no trabajan ni se capacitan
+    "neet": Indicator(
+        code="SL.UEM.NEET.ZS",
+        label="Jóvenes NEET (8.6.1)",
+        source="worldbank",
+        unit="% jóvenes 15-24",
+        country="MEX",
+    ),
+
+    # ── ODS 9.1.1 ─────────────────────────────────────────────────────────────
+    # Proxy: % población rural con acceso a carretera transitable todo el año
+    # Nota: el indicador exacto (Rural Access Index) solo está en datos de proyecto
+    # del Banco Mundial, no en su API pública. Este es el proxy más cercano.
+    "acceso_carretera": Indicator(
+        code="IS.ROD.PAVE.ZS",
+        label="Carreteras pavimentadas (proxy 9.1.1)",
+        source="worldbank",
+        unit="% del total de carreteras",
+        country="MEX",
+    ),
+
+    # ── ODS 3.4.2a ────────────────────────────────────────────────────────────
+    # Tasa de mortalidad por suicidio (por 100,000 habitantes)
+    "suicidio": Indicator(
+        code="SH.STA.SUIC.P5",
+        label="Mortalidad por suicidio (3.4.2)",
+        source="worldbank",
+        unit="por 100,000 hab.",
+        country="MEX",
+    ),
+
+    # ── ODS 5.5.2 ─────────────────────────────────────────────────────────────
+    # Proporción de mujeres en cargos directivos y gerenciales
+    # Advertencia: cobertura irregular para México — años con datos: ~2000, 2010, 2019
+    "mujeres_directivas": Indicator(
+        code="SL.EMP.SMGT.FE.ZS",
+        label="Mujeres en puestos directivos (5.5.2)",
+        source="worldbank",
+        unit="% del total de directivos",
+        country="MEX",
+    ),
+
+    # ── ODS 13.3.1 ────────────────────────────────────────────────────────────
+    # Proxy: emisiones totales de GHG (kt CO2 equivalente)
+    # Nota: el indicador oficial pide desglose por sector (energía, AFOLU, residuos).
+    # El WB solo publica el total. Para desglose sectorial usar SEMARNAT o Climate Watch.
+    "ghg_total": Indicator(
+        code="EN.ATM.GHGT.KT.CE",
+        label="Emisiones GHG totales (proxy 13.3.1)",
+        source="worldbank",
+        unit="kt CO₂ equivalente",
+        country="MEX",
+    ),
+
+    # ── ODS 10.2.1a ───────────────────────────────────────────────────────────
+    # Proxy: tasa de crecimiento del ingreso del 40% más pobre
+    # Nota: el indicador exacto (% bajo la mediana) está en microdatos ENIGH/CEPAL.
+    # Este es el proxy disponible en WB para desigualdad de ingresos en México.
+    "ingreso_40_inferior": Indicator(
+        code="SI.SPR.PC40.ZG",
+        label="Crecimiento ingreso 40% inferior (proxy 10.2.1)",
+        source="worldbank",
+        unit="% anual",
+        country="MEX",
+    ),
+}
+
+#── Catálogo de indicadores ─────────────────────────────────────────────────
+# Edita este dict para agregar los indicadores que te interesen.
+# World Bank codes: https://data.worldbank.org/indicator
+# INEGI series:     https://www.inegi.org.mx/servicios/api_indicadores.html
+
+CATALOG: dict[str, Indicator] = {
+
+    # ── ODS 1 — Fin de la pobreza ──────────────────────────────────────────────
+    "pobreza_extrema": Indicator(
+        code="SI.POV.DDAY",
+        label="Pobreza extrema (<$2.15/día)",
+        source="worldbank",
+        unit="%",
+    ),
+    "gini": Indicator(
+        code="SI.POV.GINI",
+        label="Coeficiente Gini",
+        source="worldbank",
+        unit="índice",
+    ),
+
+    # ── ODS 3 — Salud ─────────────────────────────────────────────────────────
+    "mortalidad_infantil": Indicator(
+        code="SH.DYN.MORT",
+        label="Mortalidad infantil (por 1,000)",
+        source="worldbank",
+        unit="por 1,000 nacidos",
+    ),
+    "esperanza_vida": Indicator(
+        code="SP.DYN.LE00.IN",
+        label="Esperanza de vida al nacer",
+        source="worldbank",
+        unit="años",
+    ),
+
+    # ── ODS 4 — Educación ─────────────────────────────────────────────────────
+    "matricula_primaria": Indicator(
+        code="SE.PRM.ENRR",
+        label="Matrícula primaria neta",
+        source="worldbank",
+        unit="%",
+    ),
+
+    # ── ODS 5 — Género ────────────────────────────────────────────────────────
+    "brecha_laboral_genero": Indicator(
+        code="SL.TLF.CACT.FE.ZS",
+        label="Tasa actividad laboral femenina",
+        source="worldbank",
+        unit="%",
+    ),
+
+    # ── ODS 8 — Trabajo y crecimiento ─────────────────────────────────────────
+    "desempleo": Indicator(
+        code="SL.UEM.TOTL.ZS",
+        label="Desempleo total",
+        source="worldbank",
+        unit="%",
+    ),
+    "pib_per_capita": Indicator(
+        code="NY.GDP.PCAP.CD",
+        label="PIB per cápita (USD)",
+        source="worldbank",
+        unit="USD",
+    ),
+
+    # ── INEGI — Indicadores nacionales ────────────────────────────────────────
+    # BIE series IDs: https://www.inegi.org.mx/app/indicadores/
+    # Estos IDs son ejemplos reales del Banco de Información Económica (BIE)
+    "inegi_pib_trimestral": Indicator(
+        code="493911",          # PIB a precios constantes, serie BIE
+        label="PIB trimestral (INEGI)",
+        source="inegi",
+        unit="millones MXN",
+    ),
+    "inegi_desempleo": Indicator(
+        code="444612",          # Tasa de desocupación nacional
+        label="Desocupación nacional (INEGI-ENOE)",
+        source="inegi",
+        unit="%",
+    ),
+    "inegi_inflacion": Indicator(
+        code="216064",          # INPC general
+        label="Inflación (INPC)",
+        source="inegi",
+        unit="índice",
+    ),
+    
+    
+}
+
+CATALOG["neet"] = Indicator(
+    code="SL.UEM.NEET.ZS",
+    label="NEET total (8.6.1)",
+    source="worldbank",
+    unit="% jóvenes 15-24",
+)
+CATALOG["neet_f"] = Indicator(
+    code="SL.UEM.NEET.FE.ZS",
+    label="NEET mujeres (8.6.1)",
+    source="worldbank",
+    unit="% jóvenes 15-24",
+)
+CATALOG["neet_m"] = Indicator(
+    code="SL.UEM.NEET.MA.ZS",
+    label="NEET hombres (8.6.1)",
+    source="worldbank",
+    unit="% jóvenes 15-24",
+)
+
+# ── ODS — fuente ONU SDG API ──────────────────────────────────────────────────
+CATALOG["onu_neet"] = Indicator(
+    code="8.6.1",
+    label="Jóvenes NEET (8.6.1 ONU)",
+    source="onu_sdg",
+    unit="% jóvenes 15-24",
+)
+CATALOG["onu_mujeres_directivas"] = Indicator(
+    code="5.5.2",
+    label="Mujeres en dirección (5.5.2 ONU)",
+    source="onu_sdg",
+    unit="% puestos directivos",
+)
+CATALOG["onu_suicidio"] = Indicator(
+    code="3.4.2",
+    label="Mortalidad por suicidio (3.4.2 ONU)",
+    source="onu_sdg",
+    unit="por 100,000 hab.",
+)
+CATALOG["onu_ghg"] = Indicator(
+    code="13.2.2",
+    label="Emisiones GHG (13.2.2 ONU)",
+    source="onu_sdg",
+    unit="Mt CO₂ equivalente",
+)
+
+# %% ── Mapeo ODS metas → World Bank ──────────────────────────────────────────
+# Solo metas principales — un indicador representativo por meta
+# Fuente de referencia: https://data.worldbank.org/indicator
+
+ODS_WB_METAS = {
+
+    # ODS 1 — Fin de la pobreza
+    "1.1.1": "SI.POV.DDAY",       # pobreza extrema $2.15/día
+    "1.2.1": "SI.POV.NAHC",       # pobreza nacional
+    "1.3.1": "per.allsp.cov.q1.tot", # cobertura protección social
+
+    # ODS 2 — Hambre cero
+    "2.1.1": "SN.ITK.DEFC.ZS",    # subalimentación
+    "2.2.1": "SH.STA.STNT.ZS",    # retraso en crecimiento infantil
+    "2.2.2": "SH.STA.WAST.ZS",    # emaciación infantil
+
+    # ODS 3 — Salud
+    "3.1.1": "SH.STA.MMRT",       # mortalidad materna
+    "3.1.2": "SH.STA.BRTC.ZS",    # partos atendidos
+    "3.2.1": "SH.DYN.MORT",       # mortalidad infantil <5
+    "3.2.2": "SH.DYN.NMRT",       # mortalidad neonatal
+    "3.3.1": "SH.HIV.INCID",      # incidencia VIH
+    "3.4.1": "SH.DYN.NCOM.ZS",    # mortalidad enfermedades no transmisibles
+    "3.4.2": "SH.STA.SUIC.P5",    # suicidio
+    "3.6.1": "SH.STA.TRAF.P5",    # muertes por tráfico
+    "3.8.1": "SH.UHC.SRVS.CV.XD", # cobertura salud universal
+    "3.b.1": "SH.VAC.TTNS.ZS",    # cobertura vacunación
+
+    # ODS 4 — Educación
+    "4.1.1": "SE.PRM.NENR",       # matrícula primaria neta
+    "4.2.1": "SE.PRE.ENRR",       # preescolar
+    "4.3.1": "SE.TER.ENRR",       # educación terciaria
+    "4.4.1": "SL.TLF.CACT.ZS",    # proxy — tasa actividad (habilidades TIC no disponible)
+    "4.6.1": "SE.ADT.LITR.ZS",    # alfabetización adultos
+    "4.a.1": "SE.PRM.TCAQ.ZS",    # docentes calificados primaria
+
+    # ODS 5 — Género
+    "5.2.1": "SG.VAW.1549.ZS",    # violencia de pareja
+    "5.3.1": "SP.M18.2024.FE.ZS", # matrimonio infantil
+    "5.4.1": "SG.TIM.UWRK.FE",    # trabajo no remunerado mujeres
+    "5.5.1": "SG.GEN.PARL.ZS",    # mujeres en parlamento
+    "5.5.2": "SL.EMP.SMGT.FE.ZS", # mujeres en dirección
+    "5.6.1": "SP.DYN.CONU.ZS",    # uso anticonceptivos
+
+    # ODS 6 — Agua
+    "6.1.1": "SH.H2O.SMDW.ZS",   # agua potable segura
+    "6.2.1": "SH.STA.SMSS.ZS",    # saneamiento básico
+
+    # ODS 7 — Energía
+    "7.1.1": "EG.ELC.ACCS.ZS",   # acceso electricidad
+    "7.1.2": "EG.CFT.ACCS.ZS",   # combustibles limpios cocina
+    "7.2.1": "EG.ELC.RNEW.ZS",   # energía renovable
+    "7.3.1": "EG.EGY.PRIM.PP.KD", # intensidad energética
+
+    # ODS 8 — Trabajo
+    "8.1.1": "NY.GDP.PCAP.KD.ZG", # crecimiento PIB per cápita
+    "8.2.1": "NV.IND.MANF.KD.ZG", # crecimiento manufactura
+    "8.5.2": "SL.UEM.TOTL.ZS",   # desempleo total
+    "8.6.1": "SL.UEM.NEET.ZS",   # NEET jóvenes
+    "8.7.1": "SL.TLF.0714.ZS",   # trabajo infantil
+    "8.10.1":"FB.CBK.BRCH.P5",   # sucursales bancarias
+
+    # ODS 9 — Industria
+    "9.1.1": "IS.ROD.PAVE.ZS",   # carreteras pavimentadas (proxy)
+    "9.2.1": "NV.IND.MANF.ZS",   # manufactura % PIB
+    "9.4.1": "EN.ATM.CO2E.KD.ZG", # CO2 por unidad de PIB
+    "9.5.1": "GB.XPD.RSDV.GD.ZS", # I+D % PIB
+    "9.c.1": "IT.CEL.SETS.P2",   # suscripciones móviles
+
+    # ODS 10 — Desigualdad
+    "10.1.1": "SI.POV.GINI",      # Gini
+    "10.2.1": "SI.SPR.PC40.ZG",   # ingreso 40% inferior (proxy)
+
+    # ODS 11 — Ciudades
+    "11.1.1": "EN.POP.SLUM.UR.ZS", # población en tugurios
+    "11.6.2": "EN.ATM.PM25.MC.M3", # contaminación aire PM2.5
+
+    # ODS 13 — Clima
+    "13.2.2": "EN.ATM.GHGT.KT.CE", # emisiones GHG totales
+
+    # ODS 16 — Paz
+    "16.1.1": "VC.IHR.PSRC.P5",   # homicidios
+    "16.3.2": "VC.PKP.TOTL.UN",   # presos sin condena (proxy)
+    "16.6.1": "GC.TAX.TOTL.GD.ZS", # ingresos gobierno (proxy instituciones)
+
+    # ODS 17 — Alianzas
+    "17.1.1": "GC.TAX.TOTL.GD.ZS", # recaudación fiscal % PIB
+    "17.4.1": "DT.TDS.DECT.GN.ZS", # servicio de deuda
+    "17.8.1": "IT.NET.USER.ZS",    # usuarios de internet
+}
+
+# %% ── DataFactory completa ───────────────────────────────────────────────────
+import json, time, requests
+from pathlib import Path
+import pandas as pd
+import wbgapi as wb
+
+ONU_SDG_BASE  = "https://unstats.un.org/sdgs/UNSDGAPIV5/v1"
+ONU_AREA_CODE = "484"  # México ISO-3166 numérico
+
+class DataFactory:
+
+    WB_BASE    = "https://api.worldbank.org/v2"
+    INEGI_BASE = "https://www.inegi.org.mx/app/indicadores/ws/series/BISE"
+
+    def __init__(self, cache_dir: Path = CACHE_DIR, use_cache: bool = True):
+        self.cache_dir = cache_dir
+        self.use_cache = use_cache
+
+    # ── Caché ─────────────────────────────────────────────────────────────────
+
+    def _cache_path(self, key):
+        return self.cache_dir / f"{key.replace('/', '_').replace('.', '_')}.json"
+
+    def _load_cache(self, key):
+        p = self._cache_path(key)
+        if self.use_cache and p.exists():
+            return json.loads(p.read_text())
+        return None
+
+    def _save_cache(self, key, data):
+        self._cache_path(key).write_text(json.dumps(data, ensure_ascii=False))
+
+    # ── World Bank ────────────────────────────────────────────────────────────
+
+    def fetch_worldbank(self, indicator, year_start=YEAR_START, year_end=YEAR_END):
+        cache_key = f"wb_{indicator.code}_{indicator.country}_{year_start}_{year_end}"
+        cached = self._load_cache(cache_key)
+        if cached:
+            records = cached
+        else:
+            try:
+                df_raw = wb.data.DataFrame(
+                    indicator.code,
+                    economy=indicator.country,
+                    time=range(year_start, year_end + 1),
+                )
+                df_raw = df_raw.stack().reset_index()
+                df_raw.columns = ["economy", "year", "value"]
+                df_raw["year"] = df_raw["year"].astype(str).str.extract(r"(\d{4})").astype(int)
+                records = df_raw[["year", "value"]].to_dict("records")
+                self._save_cache(cache_key, records)
+            except Exception as e:
+                return pd.DataFrame(columns=["year", "value", "label", "unit", "source"])
+
+        df = pd.DataFrame(records).dropna(subset=["value"]).sort_values("year").reset_index(drop=True)
+        df["label"]  = indicator.label
+        df["unit"]   = indicator.unit
+        df["source"] = "worldbank"
+        return df
+
+    # ── INEGI ─────────────────────────────────────────────────────────────────
+
+    def fetch_inegi(self, indicator, year_start=YEAR_START, year_end=YEAR_END):
+        cache_key = f"inegi_{indicator.code}_{year_start}_{year_end}"
+        cached = self._load_cache(cache_key)
+        if cached:
+            records = cached
+        else:
+            token = indicator.extra_params.get("token", "")
+            if not token:
+                return pd.DataFrame(columns=["year", "value", "label", "unit", "source"])
+            url = f"{self.INEGI_BASE}/ObtenerDatosBIE?indicadores={indicator.code}&token={token}"
+            try:
+                resp = requests.get(url, timeout=10)
+                resp.raise_for_status()
+                raw = resp.json()
+                records = []
+                for obs in raw.get("Series", [{}])[0].get("OBSERVATIONS", []):
+                    year = int(str(obs.get("TIME_PERIOD", "0"))[:4])
+                    if year_start <= year <= year_end:
+                        try:
+                            records.append({"year": year, "value": float(obs["OBS_VALUE"])})
+                        except (TypeError, ValueError):
+                            pass
+                self._save_cache(cache_key, records)
+            except Exception as e:
+                return pd.DataFrame(columns=["year", "value", "label", "unit", "source"])
+
+        df = pd.DataFrame(records).dropna(subset=["value"]).sort_values("year").reset_index(drop=True)
+        df["label"]  = indicator.label
+        df["unit"]   = indicator.unit
+        df["source"] = "inegi"
+        return df
+
+    # ── ONU SDG ───────────────────────────────────────────────────────────────
+
+    def fetch_onu_sdg(self, indicator, year_start=YEAR_START, year_end=YEAR_END):
+        cache_key = f"onu_{indicator.code.replace('.', '_')}_{ONU_AREA_CODE}_{year_start}_{year_end}"
+        cached = self._load_cache(cache_key)
+        if cached:
+            records = cached
+        else:
+            url = (
+                f"{ONU_SDG_BASE}/sdg/Indicator/Data"
+                f"?indicator={indicator.code}"
+                f"&areaCode={ONU_AREA_CODE}"
+                f"&timePeriodStart={year_start}"
+                f"&timePeriodEnd={year_end}"
+            )
+            try:
+                resp = requests.get(url, timeout=15)
+                resp.raise_for_status()
+                raw = resp.json()
+            except Exception as e:
+                return pd.DataFrame(columns=["year", "value", "label", "unit", "source"])
+
+            total = raw.get("totalElements", 0)
+            if total == 0:
+                return pd.DataFrame(columns=["year", "value", "label", "unit", "source"])
+
+            # dimensions es dict plano: {"Sex": "BOTHSEX", "Age": "15-24", ...}
+            records = []
+            series_vistas = set()
+            for obs in raw.get("data", []):
+                dims = obs.get("dimensions", {})
+
+                sexo = dims.get("Sex", "BOTHSEX")
+                area = dims.get("Location", "ALLAREA")
+
+                if sexo not in ("BOTHSEX", "_T", "") or area not in ("ALLAREA", "_T", ""):
+                    series_vistas.add(f"Sex={sexo}, Location={area}")
+                    continue
+
+                try:
+                    year = int(obs["timePeriodStart"])
+                    val  = float(obs["value"])
+                    if year_start <= year <= year_end:
+                        records.append({"year": year, "value": val})
+                except (KeyError, ValueError, TypeError):
+                    continue
+
+            if not records:
+                # Sin filtros — tomar todo lo que haya
+                for obs in raw.get("data", []):
+                    try:
+                        year = int(obs["timePeriodStart"])
+                        val  = float(obs["value"])
+                        if year_start <= year <= year_end:
+                            records.append({"year": year, "value": val})
+                    except (KeyError, ValueError, TypeError):
+                        continue
+
+            if not records:
+                if series_vistas:
+                    return pd.DataFrame(columns=["year", "value", "label", "unit", "source"])
+
+            self._save_cache(cache_key, records)
+
+        df = (pd.DataFrame(records)
+                .dropna(subset=["value"])
+                .drop_duplicates(subset=["year"])
+                .sort_values("year")
+                .reset_index(drop=True))
+        df["label"]  = indicator.label
+        df["unit"]   = indicator.unit
+        df["source"] = "onu_sdg"
+        return df
+
+        #ODS blabla--------
+        
+    # ── Dispatcher ────────────────────────────────────────────────────────────
+
+    def fetch(self, indicator, year_start=YEAR_START, year_end=YEAR_END):
+        if indicator.source == "worldbank":
+            return self.fetch_worldbank(indicator, year_start, year_end)
+        elif indicator.source == "inegi":
+            return self.fetch_inegi(indicator, year_start, year_end)
+        elif indicator.source == "onu_sdg":
+            return self.fetch_onu_sdg(indicator, year_start, year_end)
+        else:
+            raise ValueError(f"Fuente no soportada: {indicator.source}")
+
+    def fetch_many(self, keys, year_start=YEAR_START, year_end=YEAR_END, delay=0.3):
+        results = {}
+        for key in keys:
+            if key not in CATALOG:
+                continue
+            df = self.fetch(CATALOG[key], year_start, year_end)
+            if not df.empty:
+                results[key] = df
+            time.sleep(delay)
+        return results
+
+    # ── CSV ───────────────────────────────────────────────────────────────────
+
+    def to_csv(self, datasets, prefix=""):
+        for key, df in datasets.items():
+            path = self.cache_dir / f"{prefix}{key}.csv"
+            df.to_csv(path, index=False)
+
+    def from_csv(self, keys, prefix=""):
+        results = {}
+        for key in keys:
+            path = self.cache_dir / f"{prefix}{key}.csv"
+            if not path.exists():
+                continue
+            results[key] = pd.read_csv(path)
+        return results
+
+# %% ── Ejecución principal ────────────────────────────────────────────────────
+
+factory = DataFactory(use_cache=True)
+
+# ── Fuente: "live" o "csv" ────────────────────────────────────────────────────
+#FUENTE = "live"   # cambiar a "csv" para cargar sin hacer requests
+FUENTE = "csv"
+
+KEYS = [
+    "gini",
+    "neet",   # 8.6.1  — NEET jóvenes
+    "neet_f",
+    "neet_m",          
+    "onu_acceso_carretera", # 9.1.1  — lejos de carretera
+    "onu_suicidio",         # 3.4.2  — mortalidad suicidio
+    "onu_mujeres_directivas", # 5.5.2 — mujeres en dirección
+    "onu_ghg",              # 13.2.2 — emisiones GHG
+    "onu_ingreso_mediana",  # 10.2.1 — bajo mediana ingresos
+       ]
+
+if FUENTE == "csv":
+    datos = factory.from_csv(KEYS)
+else:
+    datos = factory.fetch_many(KEYS, year_start=2005, year_end=2023)
+    factory.to_csv(datos)   # guardar para la próxima vez
+
+# %% ── Barrido de disponibilidad ONU SDG para México ─────────────────────────
+import requests
+import pandas as pd
+import time
+
+ONU_SDG_BASE  = "https://unstats.un.org/sdgs/UNSDGAPIV5/v1"
+ONU_AREA_CODE = "484"  # México
+
+def get_all_indicators():
+    """Obtiene el catálogo completo de indicadores ODS de la API de ONU."""
+    url = f"{ONU_SDG_BASE}/sdg/Indicator/List"
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+def check_indicator(code):
+    """
+    Checa disponibilidad de un indicador para México.
+    Retorna dict con código, observaciones encontradas y años disponibles.
+    """
+    url = (
+        f"{ONU_SDG_BASE}/sdg/Indicator/Data"
+        f"?indicator={code}&areaCode={ONU_AREA_CODE}"
+    )
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        raw   = resp.json()
+        total = raw.get("totalElements", 0)
+        years = sorted(set(
+            int(obs["timePeriodStart"])
+            for obs in raw.get("data", [])
+            if "timePeriodStart" in obs
+        ))
+        return {
+            "indicator": code,
+            "total_obs": total,
+            "n_years":   len(years),
+            "year_min":  min(years) if years else None,
+            "year_max":  max(years) if years else None,
+            "status":    "completo" if len(years) >= 10
+                    else "parcial"  if len(years) >  0
+                    else "ausente",
+        }
+    except Exception as e:
+        return {
+            "indicator": code,
+            "total_obs": 0,
+            "n_years":   0,
+            "year_min":  None,
+            "year_max":  None,
+            "status":    "error",
+        }
+
+# ── Paso 1: descargar catálogo ────────────────────────────────────────────────
+catalogo = get_all_indicators()
+
+# El catálogo tiene: code, description, goal, target
+# Extraer solo los códigos
+codigos = [ind["code"] for ind in catalogo]
+
+# %% ── Barrido incremental ────────────────────────────────────────────────────
+import json
+from pathlib import Path
+
+BARRIDO_CACHE = Path("data_cache/barrido_onu.json")
+
+# Cargar progreso previo si existe
+if BARRIDO_CACHE.exists():
+    resultados = json.loads(BARRIDO_CACHE.read_text())
+    ya_vistos  = {r["indicator"] for r in resultados}
+else:
+    resultados = []
+    ya_vistos  = set()
+
+pendientes = [c for c in codigos if c not in ya_vistos]
+
+for i, code in enumerate(pendientes):
+    resultado = check_indicator(code)
+    resultados.append(resultado)
+
+    # Guardar cada 10 para no perder progreso
+    if (i + 1) % 10 == 0:
+        BARRIDO_CACHE.write_text(json.dumps(resultados, ensure_ascii=False))
+        completados = len(ya_vistos) + i + 1
+
+    time.sleep(0.3)  # cortesía a la API
+
+# Guardar final
+BARRIDO_CACHE.write_text(json.dumps(resultados, ensure_ascii=False))
+
+# %% ── Persistencia de barridos ───────────────────────────────────────────────
+
+def barrido_to_csv(resultados, filename):
+    """Exporta resultados de un barrido a CSV en cache_dir."""
+    path = CACHE_DIR / filename
+    pd.DataFrame(resultados).to_csv(path, index=False)
+
+def barrido_from_csv(filename):
+    """Carga resultados de barrido desde CSV. Retorna lista de dicts."""
+    path = CACHE_DIR / filename
+    if not path.exists():
+        return []
+    df = pd.read_csv(path)
+    return df.to_dict("records")
+
+# %% ── Continuar el barrido ────────────────────────────────────────────────────
+df_barrido = pd.DataFrame(resultados)
+
+# Agregar metadata del catálogo (goal, descripción)
+meta = {ind["code"]: ind for ind in catalogo}
+df_barrido["goal"]        = df_barrido["indicator"].map(lambda c: meta[c]["goal"] if c in meta else None)
+df_barrido["description"] = df_barrido["indicator"].map(lambda c: meta[c]["description"][:60] if c in meta else "")
+
+# al final del barrido ONU
+barrido_to_csv(resultados, "barrido_onu.csv")
+
+# %% ── Heatmap de disponibilidad ONU SDG — México ────────────────────────────
+import plotly.graph_objects as go
+import numpy as np
+
+# ── Preparar matriz ───────────────────────────────────────────────────────────
+
+STATUS_VAL = {"completo": 2, "parcial": 1, "ausente": 0, "error": -1}
+STATUS_LABEL = {2: "completo (≥10 años)", 1: "parcial (<10 años)", 0: "ausente", -1: "error"}
+
+df_barrido["goal_num"] = pd.to_numeric(df_barrido["goal"], errors="coerce")
+df_barrido["status_val"] = df_barrido["status"].map(STATUS_VAL)
+
+# Número de posición del indicador dentro de su ODS
+df_barrido["idx_within_goal"] = (
+    df_barrido.sort_values("indicator")
+              .groupby("goal_num")
+              .cumcount()
+)
+
+goals     = sorted(df_barrido["goal_num"].dropna().unique())
+max_cols  = df_barrido["idx_within_goal"].max() + 1
+
+# Matriz (17 filas × max_cols columnas) — NaN donde no hay indicador
+matrix     = np.full((len(goals), max_cols), np.nan)
+text_matrix = np.full((len(goals), max_cols), "", dtype=object)
+
+for _, row in df_barrido.dropna(subset=["goal_num"]).iterrows():
+    g   = int(row["goal_num"]) - 1
+    col = int(row["idx_within_goal"])
+    matrix[g, col]      = row["status_val"]
+    text_matrix[g, col] = (
+        f"<b>{row['indicator']}</b><br>"
+        f"{row['description'][:50]}<br>"
+        f"Estado: {row['status']}<br>"
+        f"Años con datos: {row['n_years']}"
+        + (f" ({row['year_min']}–{row['year_max']})" if row['n_years'] > 0 else "")
+    )
+
+```
+
+## Row {0%}
+```{python}
+#| output: false
+
+# %% ── Heatmap (función corregida) ───────────────────────────────────────────
+import plotly.graph_objects as go
+import numpy as np
+import pandas as pd
+
+def build_heatmap(resultados, catalogo_meta, title):
+    STATUS_VAL = {"completo": 2, "parcial": 1, "ausente": 0, "error": -1}
+
+    df = pd.DataFrame(resultados)
+    df["goal_num"] = pd.to_numeric(
+        df["indicator"].str.split(".").str[0], errors="coerce"
+    )
+    # Filtrar solo ODS válidos 1–17
+    df = df[df["goal_num"].between(1, 17)].copy()
+
+    df["status_val"]   = df["status"].map(STATUS_VAL)
+    df["description"]  = df["indicator"].map(
+        lambda c: catalogo_meta.get(c, {}).get("description", "")[:55]
+    )
+    df["idx_within_goal"] = (
+        df.sort_values("indicator")
+          .groupby("goal_num")
+          .cumcount()
+    )
+
+    goals    = sorted(df["goal_num"].dropna().unique())
+    max_cols = int(df["idx_within_goal"].max()) + 1
+
+    matrix      = np.full((len(goals), max_cols), np.nan)
+    text_matrix = np.full((len(goals), max_cols), "", dtype=object)
+
+    # Vectorizado — sin iterrows
+    df_valid = df.dropna(subset=["goal_num"]).copy()
+    df_valid["g"]   = df_valid["goal_num"].astype(int) - 1
+    df_valid["col"] = df_valid["idx_within_goal"].astype(int)
+    df_valid = df_valid[
+        (df_valid["g"] >= 0) & (df_valid["g"] < len(goals)) &
+        (df_valid["col"] >= 0) & (df_valid["col"] < max_cols)
+    ]
+
+    matrix[df_valid["g"].values, df_valid["col"].values] = df_valid["status_val"].values
+
+    years_str = df_valid.apply(
+        lambda r: f"{int(r['year_min'])}–{int(r['year_max'])}" if r["n_years"] > 0 else "—",
+        axis=1
+    )
+    hover = (
+        "<b>" + df_valid["indicator"] + "</b><br>" +
+        df_valid["description"] + "<br>" +
+        "Estado: " + df_valid["status"] + "<br>" +
+        "Años: " + df_valid["n_years"].astype(str) + " (" + years_str + ")"
+    )
+    text_matrix[df_valid["g"].values, df_valid["col"].values] = hover.values
+
+    fig = go.Figure(go.Heatmap(
+        z=matrix,
+        text=text_matrix,
+        hovertemplate="%{text}<extra></extra>",
+        colorscale=[
+            [0.00, "#F1EFE8"],
+            [0.25, "#444441"],
+            [0.50, "#E24B4A"],
+            [0.75, "#EF9F27"],
+            [1.00, "#1D9E75"],
+        ],
+        zmin=-1, zmax=2,
+        showscale=False,
+        xgap=2, ygap=2,
+    ))
+
+    for val, label, color in [
+        (2,  "completo (≥10 años)", "#1D9E75"),
+        (1,  "parcial (<10 años)",  "#EF9F27"),
+        (0,  "ausente",             "#E24B4A"),
+        (-1, "error",               "#888780"),
+    ]:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(size=10, color=color, symbol="square"),
+            name=label, showlegend=True,
+        ))
+
+    fig.update_layout(
+        title=title,
+        yaxis=dict(
+            tickmode="array",
+            tickvals=list(range(len(goals))),
+            ticktext=[f"ODS {int(g)}" for g in goals],
+            autorange="reversed",
+        ),
+        xaxis=dict(title="Indicadores dentro de cada ODS", showticklabels=False),
+        height=600,
+        plot_bgcolor="white",
+        legend=dict(orientation="h", y=-0.08),
+    )
+    return fig
+
+
+```
+
+## Row{0%}
+
+```{python}
+# %% ── Barrido World Bank — mismos indicadores ONU ───────────────────────────
+# Usamos el mapeo que ya conocemos: código ODS → código WB
+# Este es el mismo mapeo que construimos para el CATALOG
+#| output: false
+
+ODS_A_WB = {
+    "8.6.1":  "SL.UEM.NEET.ZS",
+    "9.1.1":  "IS.ROD.PAVE.ZS",
+    "3.4.2":  "SH.STA.SUIC.P5",
+    "5.5.2":  "SL.EMP.SMGT.FE.ZS",
+    "13.2.2": "EN.ATM.GHGT.KT.CE",
+    "10.2.1": "SI.SPR.PC40.ZG",
+    "1.1.1":  "SI.POV.DDAY",
+    "10.1.1": "SI.POV.GINI",
+    # agrega los que vayas necesitando
+}
+
+BARRIDO_WB_CACHE = Path("data_cache/barrido_wb.json")
+
+def check_indicator_wb(ods_code, wb_code, country="MEX"):
+    """Checa disponibilidad de un indicador ODS en World Bank para México."""
+    try:
+        df = wb.data.DataFrame(
+            wb_code,
+            economy=country,
+            time=range(2000, 2024),
+        )
+        df = df.stack().reset_index()
+        df.columns = ["economy", "year", "value"]
+        df = df.dropna(subset=["value"])
+        years = sorted(df["year"].astype(str).str.extract(r"(\d{4})")[0].astype(int).tolist())
+        return {
+            "indicator":    ods_code,
+            "wb_code":      wb_code,
+            "total_obs":    len(years),
+            "n_years":      len(years),
+            "year_min":     min(years) if years else None,
+            "year_max":     max(years) if years else None,
+            "status":       "completo" if len(years) >= 10
+                       else "parcial"  if len(years) >  0
+                       else "ausente",
+        }
+    except Exception as e:
+        return {
+            "indicator": ods_code,
+            "wb_code":   wb_code,
+            "total_obs": 0,
+            "n_years":   0,
+            "year_min":  None,
+            "year_max":  None,
+            "status":    "error",
+        }
+
+# ── Barrido ───────────────────────────────────────────────────────────────────
+if BARRIDO_WB_CACHE.exists():
+    resultados_wb = json.loads(BARRIDO_WB_CACHE.read_text())
+    ya_vistos_wb  = {r["indicator"] for r in resultados_wb}
+else:
+    resultados_wb = []
+    ya_vistos_wb  = set()
+
+pendientes_wb = {k: v for k, v in ODS_A_WB.items() if k not in ya_vistos_wb}
+
+for i, (ods_code, wb_code) in enumerate(pendientes_wb.items()):
+    resultado = check_indicator_wb(ods_code, wb_code)
+    resultados_wb.append(resultado)
+    BARRIDO_WB_CACHE.write_text(json.dumps(resultados_wb, ensure_ascii=False))
+    time.sleep(0.3)
+
+
+barrido_to_csv(resultados_wb, "barrido_wb.csv")
+
+# %% ── Heatmaps desde CSV o desde barrido live ────────────────────────────────
+
+FUENTE_BARRIDO = "csv"  # cambiar a "live" para usar los resultados en memoria
+
+if FUENTE_BARRIDO == "csv":
+    resultados_onu_plot = barrido_from_csv("barrido_onu.csv")
+    resultados_wb_plot  = barrido_from_csv("barrido_wb.csv")
+else:
+    resultados_onu_plot = resultados      # variable del barrido ONU
+    resultados_wb_plot  = resultados_wb   # variable del barrido WB
+
+# ── Llamadas ──────────────────────────────────────────────────────────────────
+meta_wb = {
+    r["indicator"]: {
+        "description": r.get("wb_code", ""),
+        "goal": r["indicator"].split(".")[0],
+    }
+    for r in resultados_wb
+}
+
+meta_onu = {
+    ind["code"]: {
+        "description": ind["description"],
+        "goal": ind["code"].split(".")[0],
+    }
+    for ind in catalogo
+}
+```
+
+## Row {100%}
+```{python}
+build_heatmap(resultados_onu_plot, meta_onu, "Disponibilidad ODS — ONU SDG API (México)").show()
+```
+
+# World Bank
+
+```{python}
+build_heatmap(resultados_wb_plot,  meta_wb,  "Disponibilidad ODS — World Bank (México)").show()
+```
+
+# INEGI
 ```{python}
 #Vamos a hacer una gráfica de la cantidad de datos que tenemos de cada ODS utilizando pandas y matplotlib y plotly
 import pandas as pd
@@ -45,5 +1016,3 @@ fig = px.bar(ods_counts_df, x="ODS", y="Cantidad de datos",
 )
 fig.show()
 ```
-
-# ODS's detallados

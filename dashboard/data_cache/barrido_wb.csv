@@ -1,0 +1,9 @@
+indicator,wb_code,total_obs,n_years,year_min,year_max,status
+8.6.1,SL.UEM.NEET.ZS,19,19,2005.0,2023.0,completo
+9.1.1,IS.ROD.PAVE.ZS,0,0,,,error
+3.4.2,SH.STA.SUIC.P5,22,22,2000.0,2021.0,completo
+5.5.2,SL.EMP.SMGT.FE.ZS,11,11,2013.0,2023.0,completo
+13.2.2,EN.ATM.GHGT.KT.CE,0,0,,,error
+10.2.1,SI.SPR.PC40.ZG,0,0,,,ausente
+1.1.1,SI.POV.DDAY,13,13,2000.0,2022.0,completo
+10.1.1,SI.POV.GINI,13,13,2000.0,2022.0,completo
