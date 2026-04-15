@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-04-14T21:35:34.400759",
+  "generated_at": "2026-04-14T21:40:16.323189",
   "files": {
     "barrido_onu.csv": {
       "filename": "barrido_onu.csv",
       "size_kb": 8.19,
-      "modified": "2026-04-14T21:35:34.115976",
+      "modified": "2026-04-14T21:40:15.915258",
       "rows": 251,
       "columns": [
         "indicator",
@@ -276,13 +276,13 @@
     "barrido_onu.json": {
       "filename": "barrido_onu.json",
       "size_kb": 27.79,
-      "modified": "2026-04-14T21:35:34.102803",
+      "modified": "2026-04-14T21:40:15.897050",
       "records": 251
     },
     "barrido_wb.csv": {
       "filename": "barrido_wb.csv",
       "size_kb": 0.41,
-      "modified": "2026-04-14T21:35:34.176849",
+      "modified": "2026-04-14T21:40:15.978475",
       "rows": 8,
       "columns": [
         "indicator",
@@ -336,7 +336,7 @@
     "metadata.json": {
       "filename": "metadata.json",
       "size_kb": 8.52,
-      "modified": "2026-04-14T21:35:09.114240"
+      "modified": "2026-04-14T21:35:34.408026"
     },
     "neet.csv": {
       "filename": "neet.csv",
