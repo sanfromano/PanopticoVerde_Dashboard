@@ -8,15 +8,11 @@
 
 ## Sobre el proyecto
 
-La medición de los Objetivos de Desarrollo Sostenible (ODS) en México no refleja completamente la realidad del país, no necesariamente por la falta de datos, sino por la falta de integración y prioridad institucional en su implementación.
-Esto genera una brecha entre la realidad que sí puede medirse y la forma en que oficialmente se reporta el progreso de los ODS ya que no se le está dando a los ODS el peso real a un nivel institucional Los ODS no sirven porque no se están aplicando correctamente 
-Como resultado, la medición del desarrollo sostenible en México puede ser incompleta limitando la toma de decisiones informadas y la rendición de cuentas.
+En México, distintas instituciones miden el desarrollo. Existen diferencias en los datos, cobertura y metodologías creando vacíos que distorsionan la realidad.
+
+La medición de los Objetivos de Desarrollo Sostenible (ODS) en México no refleja completamente la realidad del país, no necesariamente por la falta de datos, sino por la falta de integración y prioridad institucional en su implementación. Existen diferentes instituciones como la ONU, INEGI y el World Bank que recolectan y reportan datos, teniendo una gran variabilidad en sus reportes. Mientras algunas instituciones ofrecen datos más amplios o detallados, otras presentan limitaciones. Esto refleja una falta de integración entre los sistemas.
 
 ## ODS's elegidos
 
 Se eligieron los siguientes ODS's:
-- 3: Salud y bienestar
-- 5: Igualdad de género
-- 8: Trabajo decente y crecimiento económico
-- 10: Reducción de las desigualdades
-- 13: Acción por el clima
+- TODOS

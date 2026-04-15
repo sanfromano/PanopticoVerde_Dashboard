@@ -1,12 +1,12 @@
 ---
 title: "Medir sin ver: Los puntos ciegos del desarrollo"
 format: dashboard
-theme: minty
+theme: solar
 ---
 
 
 
-## Row {10%}
+## Row {30%}
 En México, distintas instituciones miden el desarrollo. Existen diferencias en los datos, cobertura y metodologías, creando vacíos que distorcionan la realidad.
 
 Se analizaron 3 instituciones clave: el Banco Mundial (WB), el Instituto Nacional de Estadística y Geografía (INEGI) y la ONU a través de su API de indicadores ODS. Se midieron más de 230 indicadores únicos relacionados con los 17 ODS's para observar las faltas de datos y la diferencia entre la cobertura de los distintos ODS's.
@@ -1001,18 +1001,60 @@ ods_counts_df = pd.DataFrame(list(ods_counts.items()), columns=["ODS", "Cantidad
 # Graficamos la cantidad de datos que tenemos de cada ODS utilizando plotly, las etiquetas del eje y deben estar en vertical y el título de la gráfica debe ser "Cantidad de datos por ODS reportados por INEGI"
 fig = px.bar(ods_counts_df, x="ODS", y="Cantidad de datos", 
              title="Cantidad de datos por ODS reportados por INEGI", 
-             color="ODS").update_xaxes(showticklabels=False).update_layout(
-    xaxis=dict(side="top"),
-    margin=dict(r=400),        # Margen derecho amplio para la leyenda
-    legend=dict(
-        orientation="v",       # Vertical en lugar de horizontal
-        yanchor="top",
-        y=1,
-        xanchor="left",
-        x=1.02,                # Justo a la derecha de la gráfica
-        title_text="ODS",
-        font=dict(size=10),    # Texto más pequeño si hay muchos ODS
-    ),
-)
+             color="ODS").update_xaxes(showticklabels=True, tickangle=90)
 fig.show()
+```
+```{python}
+#| output: false
+# %% ── Generar metadatos del cache ────────────────────────────────────────────
+import json
+from pathlib import Path
+from datetime import datetime
+
+def generate_cache_metadata():
+    meta = {
+        "generated_at": datetime.now().isoformat(),
+        "files": {}
+    }
+
+    for f in sorted(CACHE_DIR.iterdir()):
+        if f.suffix not in (".csv", ".json"):
+            continue
+
+        entry = {
+            "filename": f.name,
+            "size_kb":  round(f.stat().st_size / 1024, 2),
+            "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+        }
+
+        # Metadatos específicos por tipo
+        if f.suffix == ".csv":
+            df = pd.read_csv(f)
+            entry["rows"]    = len(df)
+            entry["columns"] = list(df.columns)
+            if "year" in df.columns:
+                entry["year_min"] = int(df["year"].min())
+                entry["year_max"] = int(df["year"].max())
+            if "indicator" in df.columns:
+                entry["indicators"] = sorted(df["indicator"].unique().tolist())
+            if "source" in df.columns:
+                entry["sources"] = df["source"].unique().tolist()
+            if "status" in df.columns:
+                entry["status_counts"] = df["status"].value_counts().to_dict()
+
+        elif f.suffix == ".json":
+            raw = json.loads(f.read_text())
+            if isinstance(raw, list):
+                entry["records"] = len(raw)
+
+        meta["files"][f.name] = entry
+
+    # Guardar
+    out = CACHE_DIR / "metadata.json"
+    out.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    print(f"Metadatos generados: {out}")
+    print(f"Archivos registrados: {len(meta['files'])}")
+    return meta
+
+cache_meta = generate_cache_metadata()
 ```
